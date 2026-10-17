@@ -694,6 +694,55 @@ enum LinkedListItem[T: Copyable] {
 }
 ```
 
+### Proposed extension: Inductive enums
+
+While basic recursive cases can be modeled with an explicit heap box (such as
+`HeapBox[T]`), the
+[companion proposal on Inductive Types and Structural Recursion](inductive-types-and-structural-recursion.md)
+introduces first-class **inductive enums**—bringing the expressive power of
+modern functional languages like OCaml and Lean 4 into Mojo's systems-level,
+deterministic memory model.
+
+An `inductive enum` allows cases to reference `Self` at designated recursive
+positions (directly, in payload structs, or inside child collections like
+`List[Self]` and `Dict[K, Self]`):
+
+```mojo
+inductive enum Expr:
+    case num(Int)
+    case add(Self, Self)
+    case if_else(Self, Self, Self)
+```
+
+Key aspects of the inductive enum design include:
+
+- **Shared Immutable Nodes:** Inductive values represent lightweight,
+  pointer-sized handles to immutable directed acyclic graph (DAG) nodes managed
+  via atomic reference counting. Copying a handle is a cheap $O(1)$ pointer copy
+  with an atomic increment, without cloning payloads.
+- **Stack-Safe Iterative Deallocation:** Dropping deep recursive trees (such as
+  an AST 100,000 levels deep) does not invoke recursive destructors down the
+  call stack. Instead, the runtime reclaims nodes iteratively in a flat loop
+  using a thread-local worklist, bounding native stack usage for structural
+  release to $O(1)$. Non-recursive payload destructors retain their ordinary
+  stack behavior.
+- **Deep Traversal & Lowering:** Paired with `match recursive` and the `recur`
+  keyword, the compiler enforces full constructor exhaustiveness and verifies
+  structural descent, lowering traversals onto an explicit heap frame stack to
+  prevent stack growth from structural calls.
+- **Trait Integration:** The compiler automatically synthesizes an `EnumLike`
+  conformance with immutable payload access. This requires the result of
+  `_unsafe_get_enum_payload` above to be an immutable reference for inductive
+  enums, even through a mutable handle. Derived traits (`Hashable`,
+  `Equatable`, `Writable`) leverage the exact same stack-safe mechanisms. A
+  synthesized `Inductive` trait for generic library code (such as serializers
+  and pretty-printers) is proposed as a follow-up.
+
+The companion proposal details the memory model, compares reference-counted
+nodes against owned boxes and region arenas, outlines optimization
+opportunities (such as future leaf inlining and Perceus-style in-place reuse),
+and documents validation on trees a million levels deep.
+
 ### Future consideration: Anonymous Sum Types
 
 Note: This is specifically NOT part of the initial proposal. This is included to

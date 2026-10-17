@@ -81,14 +81,15 @@ These proposals have been accepted and implementation is in progress.
 
 These proposals are still being discussed or refined.
 
-| Proposal                                          | Description                                               | Status   |
-|---------------------------------------------------|-----------------------------------------------------------|----------|
-| [async-design](async-design.md)                   | Async programming model, tasks, and runtime               | Draft    |
-| [edge-case-behaviors](edge-case-behaviors.md)     | Edge case behavior definitions                            | Draft    |
-| [mojo-and-dynamism](mojo-and-dynamism.md)         | Mojo and dynamic features                                 | Proposed |
-| [parameter-to-comptime](parameter-to-comptime.md) | Replace `@__parameter` with `comptime` statement modifier | Proposed |
-| [struct-extensions](struct-extensions.md)         | Struct extension mechanism                                | Draft    |
-| [unavailable-decorator](unavailable-decorator.md) | `@unavailable` decorator for intentionally-removed APIs   | Accepted |
+| Proposal                                                                                | Description                                               | Status   |
+|-----------------------------------------------------------------------------------------|-----------------------------------------------------------|----------|
+| [async-design](async-design.md)                                                         | Async programming model, tasks, and runtime               | Draft    |
+| [edge-case-behaviors](edge-case-behaviors.md)                                           | Edge case behavior definitions                            | Draft    |
+| [inductive-types-and-structural-recursion](inductive-types-and-structural-recursion.md) | Inductive enums and exhaustive structural recursion       | Draft    |
+| [mojo-and-dynamism](mojo-and-dynamism.md)                                               | Mojo and dynamic features                                 | Proposed |
+| [parameter-to-comptime](parameter-to-comptime.md)                                       | Replace `@__parameter` with `comptime` statement modifier | Proposed |
+| [struct-extensions](struct-extensions.md)                                               | Struct extension mechanism                                | Draft    |
+| [unavailable-decorator](unavailable-decorator.md)                                       | `@unavailable` decorator for intentionally-removed APIs   | Accepted |
 
 ## Abandoned Proposals
 

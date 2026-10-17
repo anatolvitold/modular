@@ -634,6 +634,63 @@ This form flows lexically from left to right and naturally supports sequences
 such as pattern match, boolean condition, and another pattern match. Bindings
 introduced by a `case` clause would be available to the clauses that follow it.
 
+## Proposed extension: Structural recursion
+
+Pattern matching in Mojo is designed to inspect and destructure values cleanly.
+For recursive data structures—such as abstract syntax trees (ASTs), intermediate
+representations (IRs), and JSON documents—pattern matching naturally pairs with
+**structural recursion**, drawing inspiration from modern functional languages
+like OCaml and Lean 4.
+
+The
+[companion proposal on Inductive Types and Structural Recursion](inductive-types-and-structural-recursion.md)
+introduces first-class structural functions over inductive enums via
+`match recursive` and the `recur` keyword:
+
+```mojo
+def evaluate(e: Expr) -> Int:
+    match recursive e:
+        case .num(value):
+            return value
+        case .add(recur left, recur right):
+            return left + right
+        case .if_else(recur condition, then_branch, else_branch):
+            if condition != 0:
+                return recur then_branch
+            return recur else_branch
+```
+
+In this model:
+
+- **Eager vs. On-Demand Child Evaluation:** Placing `recur` in a pattern
+  (e.g., `recur left, recur right`) requests that child results be evaluated
+  before the arm body executes. Conversely, calling `recur` inside the arm body
+  (e.g., `return recur then_branch`) lazily evaluates only the chosen branch on
+  demand, skipping unused subtrees.
+- **Compiler-Verified Descent & Termination:** The compiler verifies that every
+  recursive call strictly descends to a structural sub-element of the active
+  node. Because inductive data is finite and acyclic, this structural descent
+  rules out infinite chains of structural calls. The computation terminates
+  provided each activation performs finite local work and issues finitely many
+  child requests.
+- **Nested Pattern Coverage via Matrix Checking:** For unbounded recursive
+  types, standard bitset coverage is insufficient. The proposal uses
+  Maranget's pattern-matrix algorithm (as in OCaml and Rust) to check nested
+  constructor patterns and sequence containers (`List[Self]`) exhaustively.
+- **$O(1)$ Native Stack Usage:** Structural calls are lowered onto an explicit
+  heap frame stack. Even on graphs thousands or millions of levels deep, native
+  stack usage for structural calls remains strictly bounded. Ordinary calls and
+  payload operations retain their own stack behavior.
+- **Non-Destructive Rewriting:** Catch-all patterns like `case recur rebuilt`
+  enable concise, bottom-up tree rewrites that preserve node identity and
+  structural sharing whenever child nodes remain unchanged.
+
+This extension builds directly upon the pattern syntax, arm ordering, and guard
+semantics described throughout this document. Full design details and ownership
+rules are covered in the companion proposal, which leaves generic traversal via
+a synthesized `Inductive` trait as a follow-up. This extension is not part of
+the implementation status below.
+
 ## Implementation status
 
 The core proposal is fully implemented and expected to work correctly. The
