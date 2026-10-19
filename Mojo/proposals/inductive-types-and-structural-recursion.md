@@ -15,12 +15,7 @@ programming.
 In modern functional languages like **OCaml**, **Standard ML**, and **Lean 4**,
 algebraic inductive types and pattern-directed structural recursion are
 foundational. They allow developers to express complex data transformations
-concisely, with compiler checks for exhaustiveness. Lean also checks termination
-for total recursive definitions; OCaml and Standard ML allow unrestricted
-recursion. Their memory models differ too: OCaml uses a tracing garbage
-collector (GC), while [Lean uses reference counting][lean-runtime]. Allocation,
-indirection, and reclamation costs still matter for low-level systems
-programming, custom memory layouts, and accelerator-driven environments.
+declaratively and concisely, while shifting the burden of exhaustiveness and termination checks on compiler.
 
 Mainstream systems languages like C++ and Rust provide building blocks for
 recursive data. [Rust already has recursive algebraic enums][rust-recursive],
@@ -70,11 +65,14 @@ stack-safe traversal mechanics as structural functions. A synthesized
 `Inductive` trait, proposed as a follow-up, would extend them to generic library
 code such as serializers and pretty-printers.
 
-We have implemented and validated the core storage and traversal mechanisms in
-an open-source prototype, [FP Mojo][fp], which successfully verifies iterative
-evaluation and stack-safe cleanup on graphs a million levels deep.
-[The Prototype](#the-prototype) section details its test suite and highlights
-where this native proposal builds upon that foundation.
+As a proof of concept, we have implemented and validated the core storage and
+traversal mechanisms in [FP Mojo][fp], an open-source functional programming
+library for Mojo 1.1. It runs the [first example](#a-first-example) on today's
+toolchain, and its tests verify iterative evaluation and stack-safe cleanup on
+graphs a million levels deep. [The FP Mojo Prototype](#the-fp-mojo-prototype)
+section introduces the library, shows the first example written with it, maps
+each part of this proposal to its library counterpart, and highlights where this
+native proposal builds upon that foundation.
 
 > **Scope Note:** This proposal focuses specifically on finite inductive data
 > and well-founded structural computations over it. Coinductive infinite
@@ -122,8 +120,9 @@ def main():
 ```
 
 *(Note: The native syntax shown above represents this proposal's proposed
-language design. The [FP Mojo prototype](#the-prototype) demonstrates equivalent
-behavior working on today's pinned Mojo toolchain.)*
+language design. The [FP Mojo prototype](#the-fp-mojo-prototype) runs
+[the same example](#the-first-example-in-fp-mojo) as a library on today's pinned
+Mojo toolchain.)*
 
 ### How It Works
 
@@ -1357,10 +1356,92 @@ phases:
 - Derived `Equatable`, `Hashable`, and `Writable` implementations.
 - In-place buffer reuse optimizations for unique owned subjects (`var`).
 
-## The Prototype
+## The FP Mojo Prototype
 
 We have implemented and verified the core concepts of this proposal in
-[FP Mojo][fp], an open-source library built for Mojo 1.1.
+[FP Mojo][fp], an open-source functional programming library built for Mojo
+1.1. Alongside pipelines, lazy iteration, and typed results, it provides
+inductive data types and exhaustive structural pattern matching as an ordinary
+library, with no compiler changes. It is published under the Apache 2.0 license
+as `fp_mojo` in the [Modular community channel][fp-package], and is verified on
+Linux x86-64 and macOS arm64.
+
+### The First Example in FP Mojo
+
+The [first example](#a-first-example), written with FP Mojo, runs on Mojo 1.1
+today and prints 5 twice:
+
+```mojo
+import fp
+from fp.adt import Data, Cases, Node, Value
+from fp.matching import Next
+
+
+@fieldwise_init
+struct Num(Copyable, Equatable):
+    var value: Int
+
+
+@fieldwise_init
+struct Add[R: Value](Movable):
+    var left: Self.R
+    var right: Self.R
+
+
+@fieldwise_init
+struct If[C: Value, B: Value](Movable):
+    var cond: Self.C
+    var then: Self.B
+    var other: Self.B
+
+
+struct Expr(Data):
+    comptime Layer[R: Value] = Cases[Num, Add[R], If[R, R]]
+
+
+comptime E = Node[Expr]
+
+
+def evaluate(e: E) -> Int:
+    return fp.match(e,
+        lambda (n: Num) -> Int: n.value,
+        lambda (a: Add[Int]) -> Int: a.left + a.right,
+        lambda (c: If[Int, E]) -> Next[E]: Next(c.then if c.cond != 0 else c.other))
+
+
+def simplify(e: E) -> E:
+    return fp.rewrite(e,
+        fp.when[lambda (a: Add[E]) -> Bool: a.left == Num(0), lambda (a: Add[E]) -> E: a.right])
+
+
+def main():
+    var zero: E = Num(0)
+    var x: E = If(E(Num(1)), E(Add(zero, E(Num(5)))), zero)
+    print(evaluate(x))            # 5
+    print(evaluate(simplify(x)))  # 5
+```
+
+A library cannot add syntax, so FP Mojo expresses each construct of the native
+design with types and functions:
+
+| Native Proposal                                   | FP Mojo                                                                                      |
+|:--------------------------------------------------|:---------------------------------------------------------------------------------------------|
+| `inductive enum Expr` with `case add(Self, Self)` | A `Data` type whose `Cases` list constructor structs; recursive fields use the parameter `R` |
+| Handle to a shared immutable node                 | `Node[Expr]`, an `ArcPointer` to an immutable cell                                           |
+| Iterative release                                 | [`Node.__deinit__`][data] releases children in a loop                                        |
+| `case .add(recur left, recur right)`              | A clause taking `Add[Int]`: fields declared with the result type arrive evaluated            |
+| Stored child (`then_branch`)                      | A field declared as `E` arrives as stored, as in `If[Int, E]`                                |
+| `return recur then_branch`                        | The clause returns `Next(c.then)` to continue with that child                                |
+| `case recur rebuilt`                              | `fp.rewrite` with `fp.when` rules; unchanged nodes are reused                                |
+| Per-node arguments                                | A `context=` value passed unchanged to every clause                                          |
+| `match recursive memo`                            | Automatic: a shared node is evaluated once when the result is `Copyable`                     |
+| Explicit stack                                    | `fp.match` runs one loop over a stack of pending values                                      |
+| Missing-constructor error                         | Compile-time error `fp.match: constructor ... has no clause that cannot decline`             |
+
+FP Mojo can also match two or three values at once, which bears on
+[multi-subject recursion](#open-questions).
+
+### What It Validates
 
 The prototype's test suite validates:
 
@@ -1370,8 +1451,9 @@ The prototype's test suite validates:
 - Lazy evaluation of pattern-requested children.
 - Non-destructive bottom-up rewriting with identity reuse.
 
-The prototype uses typed clauses to request child results and `Next` to select
-a continuation. `Next` checks for decreasing height at runtime; the native
+### Where the Native Design Differs
+
+In the prototype, `Next` checks for decreasing height at runtime; the native
 proposal instead checks structural descent in the compiler. The prototype also
 copies clause payloads where the native design can borrow, and memoizes shared
 nodes automatically when results are `Copyable`.
@@ -1410,6 +1492,10 @@ pixi run mojo run -I src tests/runtime/test_rewrite.mojo
 pixi run compile-fail --source --filter match_ --werror --jobs 2
 ```
 
+To use the published package in your own [Pixi](https://pixi.sh) project
+instead, add `https://repo.prefix.dev/modular-community` to the workspace
+channels and run `pixi add fp_mojo "mojo==1.1.0"`.
+
 ## Open Questions
 
 1. **Syntax and Keywords:** Are `inductive enum`, `match recursive`, `recur`,
@@ -1442,6 +1528,7 @@ pixi run compile-fail --source --filter match_ --werror --jobs 2
     children of other members of an inductive group?
 
 [fp]: https://github.com/Spellbound-Mojo/fp_mojo/tree/2c2b163ecec70c88440b336d4068cb6b3ac9f91b
+[fp-package]: https://github.com/modular/modular-community/tree/main/recipes/fp_mojo
 [architecture]: https://github.com/Spellbound-Mojo/fp_mojo/blob/2c2b163ecec70c88440b336d4068cb6b3ac9f91b/docs/content/architecture/matching.md
 [data]: https://github.com/Spellbound-Mojo/fp_mojo/blob/2c2b163ecec70c88440b336d4068cb6b3ac9f91b/src/fp/adt/data.mojo
 [engine]: https://github.com/Spellbound-Mojo/fp_mojo/blob/2c2b163ecec70c88440b336d4068cb6b3ac9f91b/src/fp/matching/_engine.mojo
